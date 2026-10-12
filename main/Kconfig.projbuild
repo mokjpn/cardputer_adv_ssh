@@ -1,0 +1,16 @@
+menu "CardTFT"
+config CARDTFT_EXTERNAL
+    bool "Use external GMT028-05 ST7789 (320x240 landscape)"
+    default n
+config CARDTFT_JAPANESE
+    bool "Use Japanese efont glyphs (otherwise original Chinese efont)"
+    default y
+config CARDTFT_INVERT
+    bool "Invert external panel colors"
+    depends on CARDTFT_EXTERNAL
+    default y
+config CARDTFT_RGB_ORDER
+    bool "Swap external panel RGB/BGR order"
+    depends on CARDTFT_EXTERNAL
+    default n
+endmenu

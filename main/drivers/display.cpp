@@ -1,14 +1,29 @@
 #include "drivers/display.h"
+#include "drivers/efont_glyph.h"
 
 #include <algorithm>
 
 #include "M5Unified.hpp"
+#include "sdkconfig.h"
+#include "drivers/cardtft_panel.h"
+#ifdef CONFIG_CARDTFT_JAPANESE
+#include "lgfx/Fonts/efont/lgfx_efont_ja.h"
+#define EFONT(name) lgfx_efont_ja_##name
+#else
 #include "lgfx/Fonts/efont/lgfx_efont_cn.h"
+#define EFONT(name) lgfx_efont_cn_##name
+#endif
 #include "lgfx/utility/pgmspace.h"
 #include "terminal/terminal_emulator.h"
 
 namespace adv {
 namespace {
+#ifdef CONFIG_CARDTFT_EXTERNAL
+CardTftPanel external_display;
+lgfx::LGFX_Device& screen = external_display;
+#else
+lgfx::LGFX_Device& screen = M5.Display;
+#endif
 constexpr uint32_t kBg = 0x101820;
 constexpr uint32_t kFg = 0xE8F0F2;
 constexpr uint32_t kDim = 0x8EA0A8;
@@ -96,14 +111,14 @@ const uint8_t* terminal_efont()
 {
     switch (g_terminal_font_face) {
         case TerminalFontFace::kCjk12Bold:
-            return lgfx_efont_cn_12_b;
+            return EFONT(12_b);
         case TerminalFontFace::kCjk10:
-            return lgfx_efont_cn_10;
+            return EFONT(10);
         case TerminalFontFace::kCjk14:
-            return lgfx_efont_cn_14;
+            return EFONT(14);
         case TerminalFontFace::kCjk12:
         default:
-            return lgfx_efont_cn_12;
+            return EFONT(12);
     }
 }
 
@@ -127,20 +142,20 @@ int terminal_chrome_height(TerminalChromeMode mode)
 
 void use_ui_font()
 {
-    M5.Display.setFont(&fonts::Font0);
-    M5.Display.setTextSize(1);
-    M5.Display.setTextWrap(false, false);
+    screen.setFont(&fonts::Font0);
+    screen.setTextSize(1);
+    screen.setTextWrap(false, false);
 }
 
 void use_terminal_font(const TerminalLayout& layout)
 {
     if (layout.ascii_8x16) {
-        M5.Display.setFont(&fonts::AsciiFont8x16);
+        screen.setFont(&fonts::AsciiFont8x16);
     } else {
-        M5.Display.setFont(&fonts::Font0);
+        screen.setFont(&fonts::Font0);
     }
-    M5.Display.setTextSize(layout.ascii_size);
-    M5.Display.setTextWrap(false, false);
+    screen.setTextSize(layout.ascii_size);
+    screen.setTextWrap(false, false);
 }
 
 std::string fit_text(const std::string& text, int width)
@@ -174,22 +189,22 @@ void draw_status_wifi_icon(int x, int y)
     uint32_t color = g_wifi_connected ? kAccent : kDim;
     int cx = x + 8;
     int cy = y + 11;
-    M5.Display.drawArc(cx, cy, 9, 8, 220, 320, color);
-    M5.Display.drawArc(cx, cy, 6, 5, 225, 315, color);
-    M5.Display.fillCircle(cx, cy, 2, color);
+    screen.drawArc(cx, cy, 9, 8, 220, 320, color);
+    screen.drawArc(cx, cy, 6, 5, 225, 315, color);
+    screen.fillCircle(cx, cy, 2, color);
     if (!g_wifi_connected) {
-        M5.Display.drawLine(x + 2, y + 3, x + 14, y + 12, kWarn);
+        screen.drawLine(x + 2, y + 3, x + 14, y + 12, kWarn);
     }
 }
 
 void draw_status_ssh_icon(int x, int y)
 {
     uint32_t color = g_ssh_connected ? kAccent : kDim;
-    M5.Display.drawRoundRect(x + 3, y + 5, 12, 8, 2, color);
-    M5.Display.drawRoundRect(x + 6, y + 1, 6, 8, 3, color);
-    M5.Display.fillCircle(x + 9, y + 9, 1, color);
+    screen.drawRoundRect(x + 3, y + 5, 12, 8, 2, color);
+    screen.drawRoundRect(x + 6, y + 1, 6, 8, 3, color);
+    screen.fillCircle(x + 9, y + 9, 1, color);
     if (!g_ssh_connected) {
-        M5.Display.drawLine(x + 2, y + 3, x + 16, y + 12, kWarn);
+        screen.drawLine(x + 2, y + 3, x + 16, y + 12, kWarn);
     }
 }
 
@@ -200,42 +215,32 @@ void draw_status_battery_icon(int x, int y)
     uint32_t outline = level >= 0 ? kDim : dim_color(kDim);
     uint32_t fill = level >= 0 && level <= 15 ? kWarn : kAccent;
 
-    M5.Display.drawRect(x, y + 2, 20, 8, outline);
-    M5.Display.fillRect(x + 20, y + 5, 2, 3, outline);
+    screen.drawRect(x, y + 2, 20, 8, outline);
+    screen.fillRect(x + 20, y + 5, 2, 3, outline);
 
     if (level >= 0) {
         int fill_width = std::clamp((level * 16 + 99) / 100, 1, 16);
-        M5.Display.fillRect(x + 2, y + 4, fill_width, 4, fill);
+        screen.fillRect(x + 2, y + 4, fill_width, 4, fill);
     } else {
-        M5.Display.drawFastHLine(x + 5, y + 6, 10, outline);
+        screen.drawFastHLine(x + 5, y + 6, 10, outline);
     }
 
     if (charging) {
-        M5.Display.drawLine(x + 10, y + 3, x + 7, y + 8, kWarn);
-        M5.Display.drawLine(x + 7, y + 8, x + 12, y + 7, kWarn);
-        M5.Display.drawLine(x + 12, y + 7, x + 9, y + 11, kWarn);
+        screen.drawLine(x + 10, y + 3, x + 7, y + 8, kWarn);
+        screen.drawLine(x + 7, y + 8, x + 12, y + 7, kWarn);
+        screen.drawLine(x + 12, y + 7, x + 9, y + 11, kWarn);
     }
 }
 
 void draw_status_icons(int y)
 {
     constexpr int kStatusWidth = 68;
-    int width = M5.Display.width();
+    int width = screen.width();
     int x = std::max(4, width - kStatusWidth - 4);
-    M5.Display.fillRect(x - 2, std::max(0, y - 2), kStatusWidth + 6, 16, kBg);
+    screen.fillRect(x - 2, std::max(0, y - 2), kStatusWidth + 6, 16, kBg);
     draw_status_wifi_icon(x, y);
     draw_status_ssh_icon(x + 22, y);
     draw_status_battery_icon(x + 44, y);
-}
-
-uint8_t font_byte(const uint8_t* ptr)
-{
-    return pgm_read_byte(ptr);
-}
-
-uint16_t font_u16(const uint8_t* ptr)
-{
-    return (static_cast<uint16_t>(font_byte(ptr)) << 8) | font_byte(ptr + 1);
 }
 
 int8_t font_i8(size_t index)
@@ -248,45 +253,6 @@ uint8_t font_header(size_t index)
 {
     const uint8_t* font = terminal_efont();
     return font_byte(&font[index]);
-}
-
-const uint8_t* find_efont_cn_glyph(uint16_t encoding)
-{
-    const uint8_t* base = terminal_efont();
-    const uint8_t* font = &base[23];
-    uint16_t start_upper = font_u16(&base[17]);
-    uint16_t start_lower = font_u16(&base[19]);
-    uint16_t start_unicode = font_u16(&base[21]);
-
-    if (encoding <= 255) {
-        if (encoding >= 'a') {
-            font += start_lower;
-        } else if (encoding >= 'A') {
-            font += start_upper;
-        }
-        for (; font_byte(font + 1) != 0; font += font_byte(font + 1)) {
-            if (font_byte(font) == encoding) {
-                return font + 2;
-            }
-        }
-        return nullptr;
-    }
-
-    font += start_unicode;
-    const uint8_t* unicode_lut = font;
-    uint16_t current = 0;
-    do {
-        font += font_u16(unicode_lut);
-        current = font_u16(unicode_lut + 2);
-        unicode_lut += 4;
-    } while (current < encoding);
-
-    for (; (current = font_u16(font)) != 0; font += font_byte(font + 2)) {
-        if (current == encoding) {
-            return font + 3;
-        }
-    }
-    return nullptr;
 }
 
 class FontDecoder {
@@ -315,12 +281,19 @@ private:
     uint8_t bit_pos_ = 0;
 };
 
-bool draw_efont_cn_glyph(uint32_t codepoint, int x, int y, uint32_t fg, int scale = 1)
+bool draw_efont_glyph(uint32_t codepoint, int x, int y, uint32_t fg, int scale = 1)
 {
     if (codepoint > 0xFFFF) {
         return false;
     }
-    const uint8_t* glyph = find_efont_cn_glyph(static_cast<uint16_t>(codepoint));
+    int horizontal_divisor = 1;
+#ifdef CONFIG_CARDTFT_JAPANESE
+    if (codepoint >= 0xff61 && codepoint <= 0xff9f) {
+        codepoint = japanese_halfwidth_glyph(codepoint);
+        horizontal_divisor = 2;
+    }
+#endif
+    const uint8_t* glyph = find_efont_glyph(terminal_efont(), static_cast<uint16_t>(codepoint));
     if (glyph == nullptr) {
         return false;
     }
@@ -338,12 +311,12 @@ bool draw_efont_cn_glyph(uint32_t codepoint, int x, int y, uint32_t fg, int scal
     int baseline = font_i8(10) + font_i8(12);
     scale = std::max(1, scale);
     int draw_y = y + (baseline - y_offset - height) * scale;
-    int draw_x = x + x_offset * scale;
+    int draw_x = x + x_offset * scale / horizontal_divisor;
     uint32_t run_lengths[2] = {};
     uint32_t lx = 0;
     uint32_t ly = 0;
 
-    M5.Display.startWrite();
+    screen.startWrite();
     while (ly < height) {
         run_lengths[0] = decoder.unsigned_bits(font_header(2));
         run_lengths[1] = decoder.unsigned_bits(font_header(3));
@@ -354,7 +327,9 @@ bool draw_efont_cn_glyph(uint32_t codepoint, int x, int y, uint32_t fg, int scal
                 uint32_t count = std::min<uint32_t>(length, width - lx);
                 length -= count;
                 if (foreground && count > 0) {
-                    M5.Display.fillRect(draw_x + lx * scale, draw_y + ly * scale, count * scale, scale, fg);
+                    int left = lx * scale / horizontal_divisor;
+                    int right = (lx + count) * scale / horizontal_divisor;
+                    if (right > left) screen.fillRect(draw_x + left, draw_y + ly * scale, right - left, scale, fg);
                 }
                 lx += count;
                 if (lx == width) {
@@ -365,7 +340,7 @@ bool draw_efont_cn_glyph(uint32_t codepoint, int x, int y, uint32_t fg, int scal
             foreground = !foreground;
         } while (foreground || decoder.unsigned_bits(1) != 0);
     }
-    M5.Display.endWrite();
+    screen.endWrite();
     return true;
 }
 
@@ -385,7 +360,7 @@ void draw_terminal_line(const std::vector<TerminalCell>& line, int row, const Te
             std::swap(fg, bg);
         }
         int x = col * layout.cell_width;
-        M5.Display.fillRect(x, y, layout.cell_width, layout.cell_height, bg);
+        screen.fillRect(x, y, layout.cell_width, layout.cell_height, bg);
     }
 
     use_terminal_font(layout);
@@ -407,22 +382,24 @@ void draw_terminal_line(const std::vector<TerminalCell>& line, int row, const Te
             fg = bg;
         }
         int x = col * layout.cell_width;
-        M5.Display.setTextColor(fg, bg);
-        M5.Display.setCursor(x, y);
+        screen.setTextColor(fg, bg);
+        screen.setCursor(x, y);
+        screen.setClipRect(x, y, std::max<int>(1, cell.width) * layout.cell_width, layout.cell_height);
         uint32_t codepoint = cell.codepoint == 0 ? ' ' : cell.codepoint;
         if (codepoint < 128) {
             char out[2] = {static_cast<char>(codepoint), '\0'};
-            M5.Display.print(out);
-        } else if (!draw_efont_cn_glyph(codepoint, x, y, fg, layout.cjk_scale)) {
-            M5.Display.print("?");
+            screen.print(out);
+        } else if (!draw_efont_glyph(codepoint, x, y, fg, layout.cjk_scale)) {
+            screen.print("?");
         }
+        screen.clearClipRect();
         if (cell.underline) {
             int width = std::max<int>(1, cell.width) * layout.cell_width;
-            M5.Display.drawFastHLine(x, y + layout.cell_height - 2, width, fg);
+            screen.drawFastHLine(x, y + layout.cell_height - 2, width, fg);
         }
         if (cell.strikethrough) {
             int width = std::max<int>(1, cell.width) * layout.cell_width;
-            M5.Display.drawFastHLine(x, y + layout.cell_height / 2, width, fg);
+            screen.drawFastHLine(x, y + layout.cell_height / 2, width, fg);
         }
     }
 }
@@ -442,18 +419,18 @@ uint32_t ansi_color(uint8_t color, bool bold)
 void header(const std::string& title)
 {
     use_ui_font();
-    M5.Display.fillScreen(kBg);
-    M5.Display.setTextColor(kAccent, kBg);
-    M5.Display.setCursor(6, 4);
-    M5.Display.print(fit_text(title, M5.Display.width() - 84).c_str());
+    screen.fillScreen(kBg);
+    screen.setTextColor(kAccent, kBg);
+    screen.setCursor(6, 4);
+    screen.print(fit_text(title, screen.width() - 84).c_str());
     draw_status_icons(3);
-    M5.Display.drawFastHLine(0, 18, M5.Display.width(), kAccent);
+    screen.drawFastHLine(0, 18, screen.width(), kAccent);
 }
 
 void terminal_header(const TerminalLayout& layout, const std::string& title)
 {
     if (layout.chrome == TerminalChromeMode::kHidden) {
-        M5.Display.fillScreen(terminal_background());
+        screen.fillScreen(terminal_background());
         return;
     }
     if (layout.chrome == TerminalChromeMode::kFull) {
@@ -462,12 +439,12 @@ void terminal_header(const TerminalLayout& layout, const std::string& title)
     }
 
     use_ui_font();
-    M5.Display.fillScreen(kBg);
-    M5.Display.setTextColor(kAccent, kBg);
-    M5.Display.setCursor(4, 2);
-    M5.Display.print(fit_text(title, M5.Display.width() - 80).c_str());
+    screen.fillScreen(kBg);
+    screen.setTextColor(kAccent, kBg);
+    screen.setCursor(4, 2);
+    screen.print(fit_text(title, screen.width() - 80).c_str());
     draw_status_icons(0);
-    M5.Display.drawFastHLine(0, kHeaderCompactHeight - 1, M5.Display.width(), kAccent);
+    screen.drawFastHLine(0, kHeaderCompactHeight - 1, screen.width(), kAccent);
 }
 
 void draw_header_status()
@@ -481,44 +458,44 @@ void draw_header_status()
 
 void draw_terminal_icon(int cx, int y, uint32_t color)
 {
-    M5.Display.drawRect(cx - 24, y, 48, 34, color);
-    M5.Display.fillRect(cx - 22, y + 2, 44, 30, 0x000000);
-    M5.Display.drawFastHLine(cx - 18, y + 8, 8, color);
-    M5.Display.drawFastVLine(cx - 10, y + 8, 8, color);
-    M5.Display.drawFastHLine(cx - 4, y + 18, 14, color);
+    screen.drawRect(cx - 24, y, 48, 34, color);
+    screen.fillRect(cx - 22, y + 2, 44, 30, 0x000000);
+    screen.drawFastHLine(cx - 18, y + 8, 8, color);
+    screen.drawFastVLine(cx - 10, y + 8, 8, color);
+    screen.drawFastHLine(cx - 4, y + 18, 14, color);
 }
 
 void draw_wifi_icon(int cx, int y, uint32_t color)
 {
-    M5.Display.drawArc(cx, y + 32, 26, 22, 215, 325, color);
-    M5.Display.drawArc(cx, y + 32, 18, 14, 220, 320, color);
-    M5.Display.drawArc(cx, y + 32, 10, 6, 230, 310, color);
-    M5.Display.fillCircle(cx, y + 32, 3, color);
+    screen.drawArc(cx, y + 32, 26, 22, 215, 325, color);
+    screen.drawArc(cx, y + 32, 18, 14, 220, 320, color);
+    screen.drawArc(cx, y + 32, 10, 6, 230, 310, color);
+    screen.fillCircle(cx, y + 32, 3, color);
 }
 
 void draw_ssh_icon(int cx, int y, uint32_t color)
 {
-    M5.Display.drawRect(cx - 21, y + 10, 42, 25, color);
-    M5.Display.drawRoundRect(cx - 12, y, 24, 22, 8, color);
-    M5.Display.fillCircle(cx, y + 22, 3, color);
-    M5.Display.drawFastVLine(cx, y + 25, 6, color);
+    screen.drawRect(cx - 21, y + 10, 42, 25, color);
+    screen.drawRoundRect(cx - 12, y, 24, 22, 8, color);
+    screen.fillCircle(cx, y + 22, 3, color);
+    screen.drawFastVLine(cx, y + 25, 6, color);
 }
 
 void draw_status_icon(int cx, int y, uint32_t color)
 {
-    M5.Display.drawCircle(cx, y + 18, 18, color);
-    M5.Display.fillCircle(cx, y + 10, 2, color);
-    M5.Display.fillRect(cx - 1, y + 16, 3, 14, color);
+    screen.drawCircle(cx, y + 18, 18, color);
+    screen.fillCircle(cx, y + 10, 2, color);
+    screen.fillRect(cx - 1, y + 16, 3, 14, color);
 }
 
 void draw_web_icon(int cx, int y, uint32_t color)
 {
-    M5.Display.drawCircle(cx, y + 20, 20, color);
-    M5.Display.drawFastHLine(cx - 17, y + 20, 34, color);
-    M5.Display.drawFastHLine(cx - 13, y + 11, 26, color);
-    M5.Display.drawFastHLine(cx - 13, y + 29, 26, color);
-    M5.Display.drawArc(cx, y + 20, 10, 20, 80, 280, color);
-    M5.Display.drawArc(cx, y + 20, 10, 20, 260, 100, color);
+    screen.drawCircle(cx, y + 20, 20, color);
+    screen.drawFastHLine(cx - 17, y + 20, 34, color);
+    screen.drawFastHLine(cx - 13, y + 11, 26, color);
+    screen.drawFastHLine(cx - 13, y + 29, 26, color);
+    screen.drawArc(cx, y + 20, 10, 20, 80, 280, color);
+    screen.drawArc(cx, y + 20, 10, 20, 260, 100, color);
 }
 
 void draw_launcher_icon(LauncherIcon icon, int cx, int y, uint32_t color)
@@ -548,9 +525,12 @@ void Display::begin()
 {
     auto cfg = M5.config();
     M5.begin(cfg);
-    M5.Display.setRotation(1);
+#ifdef CONFIG_CARDTFT_EXTERNAL
+    external_display.begin();
+#endif
+    screen.setRotation(1);
     use_ui_font();
-    M5.Display.fillScreen(kBg);
+    screen.fillScreen(kBg);
 }
 
 void Display::set_status_flags(bool wifi_connected, bool ssh_connected)
@@ -616,8 +596,8 @@ TerminalLayout Display::terminal_layout(TerminalFontMode mode) const
         }
     }
 
-    int width = std::max(1, static_cast<int>(M5.Display.width()));
-    int height = std::max(1, static_cast<int>(M5.Display.height()) - layout.top);
+    int width = std::max(1, static_cast<int>(screen.width()));
+    int height = std::max(1, static_cast<int>(screen.height()) - layout.top);
     layout.cols = std::max(8, width / layout.cell_width);
     layout.rows = std::max(4, height / layout.cell_height);
     return layout;
@@ -627,12 +607,12 @@ void Display::show_status(const std::string& title, const std::vector<std::strin
 {
     header(title);
     int y = 26;
-    M5.Display.setTextColor(kFg, kBg);
+    screen.setTextColor(kFg, kBg);
     for (const auto& line : lines) {
-        M5.Display.setCursor(6, y);
-        M5.Display.print(line.c_str());
+        screen.setCursor(6, y);
+        screen.print(line.c_str());
         y += 12;
-        if (y > M5.Display.height() - 10) {
+        if (y > screen.height() - 10) {
             break;
         }
     }
@@ -649,15 +629,15 @@ void Display::show_menu(const std::string& title, const std::vector<std::string>
         bool active = i == selected;
         uint32_t bg = active ? kAccent : kBg;
         uint32_t fg = active ? kBg : kFg;
-        M5.Display.fillRect(3, y - 2, M5.Display.width() - 6, 12, bg);
-        M5.Display.setTextColor(fg, bg);
-        M5.Display.setCursor(8, y);
-        M5.Display.print(items[i].c_str());
+        screen.fillRect(3, y - 2, screen.width() - 6, 12, bg);
+        screen.setTextColor(fg, bg);
+        screen.setCursor(8, y);
+        screen.print(items[i].c_str());
         y += 14;
     }
-    M5.Display.setTextColor(kDim, kBg);
-    M5.Display.setCursor(6, M5.Display.height() - 10);
-    M5.Display.print(footer.c_str());
+    screen.setTextColor(kDim, kBg);
+    screen.setCursor(6, screen.height() - 10);
+    screen.print(footer.c_str());
 }
 
 void Display::show_launcher(const std::vector<LauncherItem>& items, int selected, const std::string& footer)
@@ -669,65 +649,65 @@ void Display::show_launcher(const std::vector<LauncherItem>& items, int selected
 
     selected = std::clamp(selected, 0, static_cast<int>(items.size()) - 1);
     const auto& item = items[selected];
-    int width = M5.Display.width();
-    int height = M5.Display.height();
+    int width = screen.width();
+    int height = screen.height();
     int cx = width / 2;
 
     uint32_t icon_color = kAccent;
-    M5.Display.fillCircle(cx, 52, 31, kPanel);
-    M5.Display.drawCircle(cx, 52, 31, dim_color(kAccent));
+    screen.fillCircle(cx, 52, 31, kPanel);
+    screen.drawCircle(cx, 52, 31, dim_color(kAccent));
     draw_launcher_icon(item.icon, cx, 34, icon_color);
 
-    M5.Display.drawLine(18, 62, 10, 68, kDim);
-    M5.Display.drawLine(10, 68, 18, 74, kDim);
-    M5.Display.drawLine(width - 18, 62, width - 10, 68, kDim);
-    M5.Display.drawLine(width - 10, 68, width - 18, 74, kDim);
+    screen.drawLine(18, 62, 10, 68, kDim);
+    screen.drawLine(10, 68, 18, 74, kDim);
+    screen.drawLine(width - 18, 62, width - 10, 68, kDim);
+    screen.drawLine(width - 10, 68, width - 18, 74, kDim);
 
-    M5.Display.setTextColor(kFg, kBg);
-    M5.Display.setCursor(std::max(6, cx - static_cast<int>(item.title.size()) * 3), 84);
-    M5.Display.print(fit_text(item.title, width - 12).c_str());
+    screen.setTextColor(kFg, kBg);
+    screen.setCursor(std::max(6, cx - static_cast<int>(item.title.size()) * 3), 84);
+    screen.print(fit_text(item.title, width - 12).c_str());
 
-    M5.Display.setTextColor(kDim, kBg);
+    screen.setTextColor(kDim, kBg);
     std::string subtitle = fit_text(item.subtitle, width - 12);
-    M5.Display.setCursor(std::max(6, cx - static_cast<int>(subtitle.size()) * 3), 98);
-    M5.Display.print(subtitle.c_str());
+    screen.setCursor(std::max(6, cx - static_cast<int>(subtitle.size()) * 3), 98);
+    screen.print(subtitle.c_str());
 
     int dots_width = static_cast<int>(items.size()) * 10 - 4;
     int dot_x = cx - dots_width / 2;
     for (int i = 0; i < static_cast<int>(items.size()); ++i) {
         if (i == selected) {
-            M5.Display.fillRoundRect(dot_x + i * 10 - 4, 113, 8, 5, 2, kAccent);
+            screen.fillRoundRect(dot_x + i * 10 - 4, 113, 8, 5, 2, kAccent);
         } else {
-            M5.Display.fillCircle(dot_x + i * 10, 116, 2, dim_color(kDim));
+            screen.fillCircle(dot_x + i * 10, 116, 2, dim_color(kDim));
         }
     }
 
-    M5.Display.setTextColor(kDim, kBg);
-    M5.Display.setCursor(6, height - 10);
-    M5.Display.print(fit_text(footer, width - 12).c_str());
+    screen.setTextColor(kDim, kBg);
+    screen.setCursor(6, height - 10);
+    screen.print(fit_text(footer, width - 12).c_str());
 }
 
 void Display::show_text_input(const std::string& title, const std::string& label, const std::string& value, bool secret)
 {
     header(title);
-    M5.Display.setTextColor(kDim, kBg);
-    M5.Display.setCursor(6, 32);
-    M5.Display.print(label.c_str());
+    screen.setTextColor(kDim, kBg);
+    screen.setCursor(6, 32);
+    screen.print(label.c_str());
 
-    M5.Display.fillRect(6, 50, M5.Display.width() - 12, 20, 0x18242D);
-    M5.Display.drawRect(6, 50, M5.Display.width() - 12, 20, kWarn);
-    M5.Display.setTextColor(kFg, 0x18242D);
-    M5.Display.setCursor(10, 57);
+    screen.fillRect(6, 50, screen.width() - 12, 20, 0x18242D);
+    screen.drawRect(6, 50, screen.width() - 12, 20, kWarn);
+    screen.setTextColor(kFg, 0x18242D);
+    screen.setCursor(10, 57);
     if (secret) {
         std::string masked(value.size(), '*');
-        M5.Display.print(masked.c_str());
+        screen.print(masked.c_str());
     } else {
-        M5.Display.print(value.c_str());
+        screen.print(value.c_str());
     }
 
-    M5.Display.setTextColor(kDim, kBg);
-    M5.Display.setCursor(6, M5.Display.height() - 10);
-    M5.Display.print("Enter save  Esc cancel  Del backspace");
+    screen.setTextColor(kDim, kBg);
+    screen.setCursor(6, screen.height() - 10);
+    screen.print("Enter save  Esc cancel  Del backspace");
 }
 
 void Display::show_terminal(const std::vector<std::string>& lines, const std::string& input)
@@ -736,24 +716,24 @@ void Display::show_terminal(const std::vector<std::string>& lines, const std::st
     int max_lines = 8;
     int first = static_cast<int>(lines.size()) > max_lines ? static_cast<int>(lines.size()) - max_lines : 0;
     int y = 24;
-    M5.Display.setTextColor(kFg, kBg);
+    screen.setTextColor(kFg, kBg);
     for (int i = first; i < static_cast<int>(lines.size()); ++i) {
-        M5.Display.setCursor(6, y);
-        M5.Display.print(lines[i].substr(0, 38).c_str());
+        screen.setCursor(6, y);
+        screen.print(lines[i].substr(0, 38).c_str());
         y += 12;
     }
 
-    M5.Display.fillRect(0, M5.Display.height() - 22, M5.Display.width(), 22, 0x18242D);
-    M5.Display.setCursor(6, M5.Display.height() - 16);
+    screen.fillRect(0, screen.height() - 22, screen.width(), 22, 0x18242D);
+    screen.setCursor(6, screen.height() - 16);
     if (input.empty()) {
-        M5.Display.setTextColor(kDim, 0x18242D);
-        M5.Display.print("Raw shell  Esc back");
+        screen.setTextColor(kDim, 0x18242D);
+        screen.print("Raw shell  Esc back");
     } else {
-        M5.Display.setTextColor(kAccent, 0x18242D);
-        M5.Display.print("$ ");
-        M5.Display.setTextColor(kFg, 0x18242D);
+        screen.setTextColor(kAccent, 0x18242D);
+        screen.print("$ ");
+        screen.setTextColor(kFg, 0x18242D);
         std::string visible = input.size() > 32 ? input.substr(input.size() - 32) : input;
-        M5.Display.print(visible.c_str());
+        screen.print(visible.c_str());
     }
 }
 
@@ -766,10 +746,10 @@ void Display::draw_terminal_frame(const TerminalLayout& layout, const std::strin
 {
     terminal_header(layout, title);
     int terminal_height = layout.rows * layout.cell_height;
-    M5.Display.fillRect(0, layout.top, M5.Display.width(), terminal_height, terminal_background());
+    screen.fillRect(0, layout.top, screen.width(), terminal_height, terminal_background());
     int used_bottom = layout.top + terminal_height;
-    if (used_bottom < M5.Display.height()) {
-        M5.Display.fillRect(0, used_bottom, M5.Display.width(), M5.Display.height() - used_bottom, kBg);
+    if (used_bottom < screen.height()) {
+        screen.fillRect(0, used_bottom, screen.width(), screen.height() - used_bottom, kBg);
     }
 }
 

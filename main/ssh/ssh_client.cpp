@@ -1,4 +1,5 @@
 #include "ssh/ssh_client.h"
+#include "ssh/host_key_store.h"
 
 #include <cerrno>
 #include <cstring>
@@ -50,7 +51,8 @@ esp_err_t SshClient::connect_password(const SshProfile& profile)
     return connect(profile, "");
 }
 
-esp_err_t SshClient::connect(const SshProfile& profile, const std::string& private_key_pem)
+esp_err_t SshClient::connect(const SshProfile& profile, const std::string& private_key_pem,
+                             const HostKeyConfirm& confirm)
 {
     disconnect();
     last_error_.clear();
@@ -99,6 +101,18 @@ esp_err_t SshClient::connect(const SshProfile& profile, const std::string& priva
     if (rc != 0) {
         set_error(libssh2_error(session_, "ssh handshake failed"));
         disconnect();
+        return ESP_FAIL;
+    }
+
+    // No userauth call (including public-key probing) before host verification.
+    size_t host_key_size = 0;
+    int host_key_type = 0;
+    const char* host_key = libssh2_session_hostkey(session_, &host_key_size, &host_key_type);
+    std::string host_key_error;
+    if (!check_server_host_key(host_key_endpoint(profile.host, profile.port), host_key,
+                               host_key_size, confirm, host_key_error)) {
+        disconnect();
+        set_error(host_key_error);
         return ESP_FAIL;
     }
 

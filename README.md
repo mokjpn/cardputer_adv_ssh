@@ -2,6 +2,8 @@
 
 English | [中文](README.zh-CN.md)
 
+CardTFT external ST7789 and Japanese display build: [日本語のビルド・操作・実機検証手順](docs/cardtft-ja.md).
+
 Native ESP-IDF firmware for the M5Stack Cardputer-Adv (`cardputer_adv`). It turns the device into a small Wi-Fi SSH terminal with saved server profiles, persistent SSH sessions, on-device settings, and an on-demand local WebUI for easier configuration.
 
 ## Features
@@ -19,7 +21,7 @@ Native ESP-IDF firmware for the M5Stack Cardputer-Adv (`cardputer_adv`). It turn
 
 - Documentation: English by default, with a Simplified Chinese translation.
 - Device UI and WebUI: English.
-- Terminal display: UTF-8 input from the SSH session, with ASCII/English rendering and bundled M5GFX `efont_cn` CJK glyph presets for Chinese text. Unsupported glyphs render as `?`.
+- Terminal display: UTF-8 input from the SSH session, with ASCII/English rendering and bundled M5GFX `efont_ja` Japanese presets by default (build-time `CARDTFT_JAPANESE=n` restores `efont_cn`). Unsupported glyphs render as `?`.
 - Keyboard input: ASCII letters, numbers, symbols, and control keys through the Fn layer. There is no on-device Chinese input method.
 
 ## Hardware And Firmware Target
@@ -91,6 +93,8 @@ After generating a device key in the WebUI:
 1. Copy the public key.
 2. Add it to the target server user's `~/.ssh/authorized_keys`.
 3. Save an SSH profile for that server.
+
+Before any authentication, the firmware verifies a saved SHA-256 server host-key fingerprint for the host and port. First use requires on-device confirmation against a trusted fingerprint; changed keys and storage failures are refused.
 
 The firmware tries the stored private key first and falls back to the profile password when needed. A password can be left empty when the server accepts the device key.
 
