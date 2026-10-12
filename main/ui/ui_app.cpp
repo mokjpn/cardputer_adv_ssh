@@ -5,6 +5,8 @@
 #include <cstdint>
 
 #include "esp_err.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "terminal/terminal_emulator.h"
@@ -724,7 +726,32 @@ bool UiApp::connect_ssh_profile(const SshProfile& profile)
 
     refresh_status_flags();
     display_.show_status("SSH", {"Connecting", profile_label(profile)});
-    if (ssh_.connect(profile, store_.load_ssh_private_key()) != ESP_OK) {
+    auto confirm_host = [this](const std::string& endpoint, const std::string& fingerprint) {
+        // Present every byte even on the internal 240x135 display. Endpoint
+        // pagination prevents long hostnames from being silently truncated.
+        for (size_t pos = 0; pos < endpoint.size(); pos += 70) {
+            display_.show_status("Verify SSH host", {
+                endpoint.substr(pos, 35), endpoint.substr(pos + std::min<size_t>(35, endpoint.size() - pos), 35),
+                "Compare with server admin:", fingerprint.substr(0, 35), fingerprint.substr(35),
+                "Enter: next   Esc: reject"});
+            bool next = false;
+            while (!next) {
+                auto key = keyboard_.poll();
+                if (key && key->pressed) {
+                    if (key->kind == KeyKind::kEscape) return false;
+                    if (key->kind == KeyKind::kEnter) next = true;
+                }
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+        }
+        display_.show_status("Trust new SSH host?", {"Only if fingerprint matches", "Save key and authenticate?", "Press Y to trust", "Any other key: reject"});
+        while (true) {
+            auto key = keyboard_.poll();
+            if (key && key->pressed) return key->kind == KeyKind::kCharacter && key->character == 'Y';
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    };
+    if (ssh_.connect(profile, store_.load_ssh_private_key(), confirm_host) != ESP_OK) {
         refresh_status_flags();
         return false;
     }
@@ -830,7 +857,11 @@ void UiApp::terminal_screen()
         return;
     }
 
-    TerminalEmulator terminal(layout.cols, layout.rows, 300);
+    TerminalEmulator terminal(layout.cols, layout.rows, 64);
+    ESP_LOGI("terminal", "grid=%dx%d heap=%u largest=%u min=%u", layout.cols, layout.rows,
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT)));
     terminal.mark_all_dirty();
     refresh_status_flags();
 

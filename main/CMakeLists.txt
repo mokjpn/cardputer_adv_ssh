@@ -7,6 +7,7 @@ idf_component_register(
         "drivers/tca8418.cpp"
         "net/wifi_manager.cpp"
         "ssh/ssh_client.cpp"
+        "ssh/host_key_store.cpp"
         "storage/settings_store.cpp"
         "terminal/terminal_emulator.cpp"
         "ui/ui_app.cpp"

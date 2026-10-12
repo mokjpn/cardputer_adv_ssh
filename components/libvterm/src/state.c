@@ -311,6 +311,11 @@ static int on_text(const char bytes[], size_t len, void *user)
 
   VTermEncodingInstance *encoding =
     state->gsingle_set     ? &state->encoding[state->gsingle_set] :
+    /* The default GL encoding is also UTF-8. Use a single decoder instance
+     * for ASCII-led and high-bit-led chunks, otherwise a UTF-8 sequence split
+     * after an ASCII prefix loses its pending bytes on the next SSH read. */
+    (state->vt->mode.utf8 && state->encoding[state->gl_set].enc == state->encoding_utf8.enc)
+                          ? &state->encoding_utf8 :
     !(bytes[eaten] & 0x80) ? &state->encoding[state->gl_set] :
     state->vt->mode.utf8   ? &state->encoding_utf8 :
                              &state->encoding[state->gr_set];
@@ -2142,6 +2147,9 @@ void vterm_state_reset(VTermState *state, int hard)
     if(default_enc->init)
       (*default_enc->init)(default_enc, state->encoding[i].data);
   }
+
+  if(state->encoding_utf8.enc->init)
+    (*state->encoding_utf8.enc->init)(state->encoding_utf8.enc, state->encoding_utf8.data);
 
   state->gl_set = 0;
   state->gr_set = 1;

@@ -14,7 +14,11 @@ void AppController::run()
 {
     display_.begin();
     display_.show_status("Boot", {"Initializing storage..."});
-    ESP_ERROR_CHECK(store_.begin());
+    if (store_.begin() != ESP_OK) {
+        display_.show_status("Storage error", {"SSH host keys unavailable", "NVS was NOT erased", "Recover storage explicitly"});
+        ESP_LOGE(TAG, "storage initialization failed; refusing to erase host keys");
+        return;
+    }
 
     display_.show_status("Boot", {"Initializing keyboard..."});
     if (!keyboard_.begin()) {
