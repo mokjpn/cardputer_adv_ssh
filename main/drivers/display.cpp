@@ -2,6 +2,16 @@
 #include "drivers/efont_glyph.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <memory>
+#include <new>
+#include "PNGdec.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "ssh/png_validate.h"
+#include "ssh/png_probe.h"
+#include "esp_log.h"
 
 #include "M5Unified.hpp"
 #include "sdkconfig.h"
@@ -24,6 +34,35 @@ lgfx::LGFX_Device& screen = external_display;
 #else
 lgfx::LGFX_Device& screen = M5.Display;
 #endif
+struct PngDrawContext {
+    PNG* png;
+    const std::function<bool()>* cancel;
+    uint16_t row[320];
+    int x, y;
+    bool cancelled = false;
+};
+void* png_open(const char* path, int32_t* size) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return nullptr;
+    fseek(f, 0, SEEK_END); *size = ftell(f); rewind(f); return f;
+}
+void png_close(void* f) { if (f) fclose(static_cast<FILE*>(f)); }
+int32_t png_read(PNGFILE* f, uint8_t* b, int32_t n) {
+    return fread(b, 1, n, static_cast<FILE*>(f->fHandle));
+}
+int32_t png_seek(PNGFILE* f, int32_t p) {
+    FILE* file = static_cast<FILE*>(f->fHandle);
+    return fseek(file, p, SEEK_SET) == 0 ? ftell(file) : -1;
+}
+int png_draw(PNGDRAW* line) {
+    auto& ctx = *static_cast<PngDrawContext*>(line->pUser);
+    if ((*ctx.cancel)()) { ctx.cancelled = true; return 0; }
+    if (line->iWidth > 320) return 0;
+    ctx.png->getLineAsRGB565(line, ctx.row, PNG_RGB565_LITTLE_ENDIAN, 0);
+    screen.pushImage(ctx.x, ctx.y + line->y, line->iWidth, 1, ctx.row);
+    vTaskDelay(pdMS_TO_TICKS(1));
+    return 1;
+}
 constexpr uint32_t kBg = 0x101820;
 constexpr uint32_t kFg = 0xE8F0F2;
 constexpr uint32_t kDim = 0x8EA0A8;
@@ -687,7 +726,7 @@ void Display::show_launcher(const std::vector<LauncherItem>& items, int selected
     screen.print(fit_text(footer, width - 12).c_str());
 }
 
-void Display::show_text_input(const std::string& title, const std::string& label, const std::string& value, bool secret)
+void Display::show_text_input(const std::string& title, const std::string& label, const std::string& value, bool secret, bool path_history)
 {
     header(title);
     screen.setTextColor(kDim, kBg);
@@ -702,12 +741,18 @@ void Display::show_text_input(const std::string& title, const std::string& label
         std::string masked(value.size(), '*');
         screen.print(masked.c_str());
     } else {
-        screen.print(value.c_str());
+        const size_t visible = static_cast<size_t>((screen.width() - 20) / 6);
+        if (path_history && visible > 1 && value.size() > visible) {
+            screen.print("<");
+            screen.print(value.c_str() + value.size() - visible + 1);
+        } else {
+            screen.print(value.c_str());
+        }
     }
 
     screen.setTextColor(kDim, kBg);
     screen.setCursor(6, screen.height() - 10);
-    screen.print("Enter save  Esc cancel  Del backspace");
+    screen.print(path_history ? "Enter open  Esc cancel  Ctrl-P/N" : "Enter save  Esc cancel  Del backspace");
 }
 
 void Display::show_terminal(const std::vector<std::string>& lines, const std::string& input)
@@ -783,3 +828,94 @@ void Display::draw_terminal_snapshot(const std::vector<std::vector<TerminalCell>
 }
 
 }  // namespace adv
+
+namespace adv {
+bool Display::show_png(const char* path, const std::function<bool()>& cancel,
+                       std::vector<std::string>* diagnostics) {
+    PngProbe probe;
+    unsigned free = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    unsigned largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    unsigned minimum = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+    int opened = -1, decoded = -1;
+    auto fail = [&](const char* stage) {
+        // Build diagnostic strings only after failure, so they do not change
+        // the heap guard or the decoder's allocation budget.
+        ESP_LOGW("png", "stage=%s bytes=%u crc=%08lx free=%u largest=%u open=%d decode=%d",
+                 stage, static_cast<unsigned>(probe.bytes), static_cast<unsigned long>(probe.crc32),
+                 free, largest, opened, decoded);
+        if (diagnostics) {
+            auto hex = [](const uint8_t* p, size_t n) {
+                std::string out;
+                for (size_t i=0; i<n; ++i) {
+                    char s[3]; snprintf(s, sizeof(s), "%02x", p[i]); out += s;
+                }
+                return out;
+            };
+            auto be = [](const uint8_t* p) {
+                return (uint32_t(p[0])<<24)|(uint32_t(p[1])<<16)|(uint32_t(p[2])<<8)|p[3];
+            };
+            char line[96];
+            diagnostics->push_back(std::string("Stage: ")+stage);
+            snprintf(line, sizeof(line), "bytes=%u CRC32=%08lx", static_cast<unsigned>(probe.bytes),
+                     static_cast<unsigned long>(probe.crc32));
+            diagnostics->push_back(line);
+            diagnostics->push_back("head="+hex(probe.header.data(), 8));
+            diagnostics->push_back("tail="+hex(probe.tail.data(), 12));
+            diagnostics->push_back("image="+std::to_string(be(probe.header.data()+16))+"x"+
+                                   std::to_string(be(probe.header.data()+20))+" screen="+
+                                   std::to_string(screen.width())+"x"+std::to_string(screen.height()));
+            snprintf(line, sizeof(line), "free=%u largest=%u min=%u", free, largest, minimum);
+            diagnostics->push_back(line);
+            diagnostics->push_back("need="+std::to_string(sizeof(PNG)+PNG::extraWorkspaceBytes()+32768)+
+                                   " block="+std::to_string(PNG::largestAllocationBytes()));
+            diagnostics->push_back("open="+std::to_string(opened)+" decode="+std::to_string(decoded));
+        }
+        return false;
+    };
+    FILE* file = fopen(path, "rb");
+    if (!file) return fail("cache open");
+    const bool probed = probe_png(file, probe);
+    if (!probed) { fclose(file); return fail("cache read"); }
+    if (!png_header(probe.header.data(), std::min(probe.bytes, probe.header.size()), screen.width(), screen.height())) {
+        fclose(file); return fail("header / dimensions");
+    }
+    bool valid = validate_png(file, screen.width(), screen.height());
+    fclose(file);
+    if (!valid) return fail("structure / CRC");
+    // Leave 32KiB for Wi-Fi/SSH and require one contiguous decoder block.
+    free = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    minimum = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+    if (free < sizeof(PNG) + PNG::extraWorkspaceBytes() + 32768 ||
+        largest < PNG::largestAllocationBytes()) return fail("heap guard");
+    std::unique_ptr<PNG> png(new(std::nothrow) PNG);
+    if (!png || !png->workspaceReady()) return fail("decoder allocation");
+    // Check the actual remaining reserve as well as the pre-allocation budget;
+    // this includes allocator overhead and concurrent Wi-Fi allocations.
+    unsigned after_allocation = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    if (after_allocation < 32768) {
+        free = after_allocation;
+        largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        png.reset();
+        return fail("decoder reserve");
+    }
+    opened = png->open(path, png_open, png_close, png_read, png_seek, png_draw);
+    if (opened != PNG_SUCCESS) {
+        png->close(); return fail("decoder open");
+    }
+    PngDrawContext ctx{png.get(), &cancel, {}, (screen.width()-png->getWidth())/2,
+                       (screen.height()-png->getHeight())/2};
+    screen.fillScreen(0);
+    decoded = png->decode(&ctx, PNG_CHECK_CRC);
+    png->close();
+    png.reset();
+    if (ctx.cancelled) return fail("cancelled");
+    if (decoded != PNG_SUCCESS) return fail("decoder decode");
+    ESP_LOGI("png", "shown bytes=%u crc=%08lx free_before=%u largest_before=%u free_after=%u largest_after=%u min=%u",
+             static_cast<unsigned>(probe.bytes), static_cast<unsigned long>(probe.crc32), free, largest,
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT)));
+    return true;
+}
+}

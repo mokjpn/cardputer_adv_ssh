@@ -5,6 +5,7 @@
 
 #include "drivers/display.h"
 #include "drivers/keyboard.h"
+#include "ui/path_history.h"
 
 namespace adv {
 
@@ -12,7 +13,7 @@ class TextInput {
 public:
     TextInput(Display& display, Keyboard& keyboard);
     std::optional<std::string> prompt(const std::string& title, const std::string& label,
-                                      const std::string& initial = "", bool secret = false);
+                                      const std::string& initial = "", bool secret = false, PathHistory* history = nullptr);
 
 private:
     Display& display_;

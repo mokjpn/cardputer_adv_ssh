@@ -29,4 +29,11 @@ idf_component_register(
         mbedtls
         libssh2_esp
         libvterm
+        spiffs
+        pngdec
 )
+
+# Provision only the new, disposable PNG cache. The legacy storage partition
+# intentionally has no image and must never be formatted by this feature.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/png-cache-empty")
+spiffs_create_partition_image(png_cache "${CMAKE_BINARY_DIR}/png-cache-empty" FLASH_IN_PROJECT)

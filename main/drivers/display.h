@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <functional>
 #include <vector>
 
 #include "terminal/terminal_emulator.h"
@@ -69,6 +70,8 @@ struct TerminalLayout {
 class Display {
 public:
     void begin();
+    bool show_png(const char* path, const std::function<bool()>& cancel,
+                  std::vector<std::string>* diagnostics = nullptr);
     void set_status_flags(bool wifi_connected, bool ssh_connected);
     void set_terminal_chrome_mode(TerminalChromeMode mode);
     void set_terminal_theme(TerminalTheme theme);
@@ -78,7 +81,7 @@ public:
     void show_menu(const std::string& title, const std::vector<std::string>& items, int selected,
                    const std::string& footer);
     void show_launcher(const std::vector<LauncherItem>& items, int selected, const std::string& footer);
-    void show_text_input(const std::string& title, const std::string& label, const std::string& value, bool secret);
+    void show_text_input(const std::string& title, const std::string& label, const std::string& value, bool secret, bool path_history = false);
     void show_terminal(const std::vector<std::string>& lines, const std::string& input);
     void draw_terminal_frame();
     void draw_terminal_frame(const TerminalLayout& layout, const std::string& title = "Terminal");

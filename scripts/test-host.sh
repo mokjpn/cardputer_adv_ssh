@@ -16,3 +16,5 @@ c++ "${flags[@]}" -std=c++17 -ffunction-sections -fdata-sections -Itests/stubs -
 cc "${flags[@]}" -ffunction-sections -fdata-sections -Imanaged_components/m5stack__m5gfx/src -c managed_components/m5stack__m5gfx/src/lgfx/Fonts/efont/lgfx_efont_ja.c -o "$out/efont.o"
 c++ "${flags[@]}" -std=c++17 -Imain -Imanaged_components/m5stack__m5gfx/src tests/font_test.cpp "$out/efont.o" -Wl,--gc-sections -o "$out/font"
 "$out/font"
+c++ "${flags[@]}" -std=c++17 -ffunction-sections -fdata-sections -Itests/stubs -Imain -Imanaged_components/skuodi__libssh2_esp/libssh2/include tests/transfer_test.cpp main/ssh/ssh_client.cpp main/ssh/host_key_store.cpp -Wl,--gc-sections -Wl,--wrap=connect -lcrypto -o "$out/transfer"
+"$out/transfer"

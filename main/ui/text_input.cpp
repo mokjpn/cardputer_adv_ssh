@@ -8,10 +8,10 @@ namespace adv {
 TextInput::TextInput(Display& display, Keyboard& keyboard) : display_(display), keyboard_(keyboard) {}
 
 std::optional<std::string> TextInput::prompt(const std::string& title, const std::string& label,
-                                             const std::string& initial, bool secret)
+                                             const std::string& initial, bool secret, PathHistory* history)
 {
-    std::string value = initial;
-    display_.show_text_input(title, label, value, secret);
+    TextInputModel model(initial, secret, history);
+    display_.show_text_input(title, label, model.value(), secret, model.has_history());
 
     while (true) {
         auto event = keyboard_.poll();
@@ -19,29 +19,10 @@ std::optional<std::string> TextInput::prompt(const std::string& title, const std
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
-        switch (event->kind) {
-            case KeyKind::kCharacter:
-                if (event->character == '\x1b') {
-                    return std::nullopt;
-                }
-                if (value.size() < 96 && event->character >= 32 && event->character <= 126) {
-                    value.push_back(event->character);
-                }
-                break;
-            case KeyKind::kBackspace:
-            case KeyKind::kDelete:
-                if (!value.empty()) {
-                    value.pop_back();
-                }
-                break;
-            case KeyKind::kEnter:
-                return value;
-            case KeyKind::kEscape:
-                return std::nullopt;
-            default:
-                break;
-        }
-        display_.show_text_input(title, label, value, secret);
+        const auto result = model.handle(*event);
+        if (result == TextInputModel::Result::kCancel) return std::nullopt;
+        if (result == TextInputModel::Result::kSubmit) return model.take_value();
+        display_.show_text_input(title, label, model.value(), secret, model.has_history());
     }
 }
 

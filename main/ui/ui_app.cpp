@@ -5,11 +5,14 @@
 #include <cstdint>
 
 #include "esp_err.h"
+#include "esp_spiffs.h"
+#include <cstdio>
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "terminal/terminal_emulator.h"
+#include "storage/png_cache.h"
 
 namespace adv {
 namespace {
@@ -766,6 +769,84 @@ bool UiApp::active_profile_is(const SshProfile& profile) const
     return ssh_.connected() && !active_profile_.name.empty() && active_profile_.name == profile.name;
 }
 
+void UiApp::png_screen(const std::function<void()>& service)
+{
+    // Do not mount or format SD: it shares the external panel SPI bus.
+    // The legacy storage partition may contain data from earlier firmware.
+    // Only the separately provisioned png_cache partition belongs to this feature.
+    constexpr const char* cache_label = kPngCacheLabel;
+    esp_vfs_spiffs_conf_t conf{};
+    conf.base_path = "/images";
+    conf.partition_label = cache_label;
+    conf.max_files = 1;
+    conf.format_if_mount_failed = false;
+    esp_err_t mounted = esp_vfs_spiffs_register(&conf);
+    if (mounted != ESP_OK) {
+        ESP_LOGE("png", "cache mount: %s heap=%u largest=%u", esp_err_to_name(mounted),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+        pause("PNG cache unavailable", {esp_err_to_name(mounted),
+              "Dedicated cache needs service", "Existing storage was not changed"});
+        return;
+    }
+    const char* local = "/images/ssh-view.tmp";
+    remove(local); // Only this feature's reserved temporary file.
+    auto cancel = [&]() {
+        service();
+        auto e = keyboard_.poll();
+        return e && e->kind == KeyKind::kEscape;
+    };
+    while (ssh_.connected()) {
+        auto path = input_.prompt("PNG viewer", "Absolute remote path", "", false, &png_paths_);
+        if (!path) break;
+        size_t total=0, used=0;
+        if (esp_spiffs_info(cache_label, &total, &used) != ESP_OK || total-used < 320*1024) {
+            pause("PNG storage", {"Need 320KiB free", "No files were deleted"}); break;
+        }
+        FILE* file = fopen(local, "wb");
+        if (!file) { pause("PNG storage", {"Cannot create temporary file"}); break; }
+        // Avoid an additional stdio buffer during transfer.
+        setvbuf(file, nullptr, _IONBF, 0);
+        display_.show_status("PNG download", {"Esc cancels", "256KiB / 30s limit"});
+        esp_err_t result = ssh_.fetch_png(*path, file, cancel);
+        int flushed = fflush(file);
+        int closed = fclose(file);
+        std::vector<std::string> diagnostics;
+        // The temporary decoder must not make the terminal's low-heap policy
+        // evict history while processing background shell output. Leave that
+        // output under SSH backpressure until the decoder has been released.
+        auto decode_cancel = [&]() {
+            auto event = keyboard_.poll();
+            return event && event->kind == KeyKind::kEscape;
+        };
+        bool shown = result == ESP_OK && flushed == 0 && closed == 0 && display_.show_png(local, decode_cancel, &diagnostics);
+        remove(local);
+        if (!shown) {
+            if (result != ESP_OK) {
+                pause("PNG viewer", {ssh_.last_error()});
+                break;
+            }
+            if (flushed != 0 || closed != 0) {
+                diagnostics.push_back("Stage: cache flush / close");
+                diagnostics.push_back("flush="+std::to_string(flushed)+" close="+std::to_string(closed));
+            }
+            pause("PNG diagnostics", diagnostics);
+            if (menu("Invalid PNG / memory / cancelled", {"Return to terminal", "Retry remote path"},
+                     "Max screen size; 8bit noninterlaced") != 1) break;
+        } else {
+            // Decoder has already been released while the image is visible.
+            while (true) {
+                auto event = keyboard_.poll();
+                if (event && (event->kind == KeyKind::kEscape || event->kind == KeyKind::kEnter)) break;
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            break;
+        }
+    }
+    remove(local);
+    esp_vfs_spiffs_unregister(cache_label);
+}
+
 void UiApp::terminal_screen()
 {
     SshProfile profile;
@@ -876,7 +957,7 @@ void UiApp::terminal_screen()
         return "Terminal " + std::to_string(layout.cols) + "x" + std::to_string(layout.rows);
     };
     auto review_title = [&]() {
-        return "Review " + std::to_string(scroll_offset) + "/" +
+        return "p:PNG Review " + std::to_string(scroll_offset) + "/" +
                std::to_string(terminal.max_scrollback_offset());
     };
 
@@ -981,6 +1062,20 @@ void UiApp::terminal_screen()
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
+        if (review_mode && event->kind == KeyKind::kCharacter && event->character == 'p') {
+            png_screen([&]() {
+                std::string incoming;
+                if (ssh_.connected() && ssh_.read_shell_chunk(incoming, 1024) == ESP_OK) {
+                    terminal.process(incoming);
+                    flush_terminal_reply();
+                }
+            });
+            review_mode = false;
+            scroll_offset = 0;
+            redraw_live();
+            if (!ssh_.connected()) return;
+            continue;
+        }
         if (review_mode) {
             if (event->kind == KeyKind::kEscape) {
                 TickType_t now = xTaskGetTickCount();
@@ -1029,7 +1124,7 @@ void UiApp::terminal_screen()
                 return;
             }
             last_escape_tick = now;
-            if (terminal.max_scrollback_offset() > 0) {
+            { // Esc always opens review; p opens the local PNG viewer.
                 review_mode = true;
                 scroll_offset = 0;
                 draw_review();

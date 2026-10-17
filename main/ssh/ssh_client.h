@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
+#include <cstdio>
 #include <cstdint>
 #include <string>
 
@@ -34,6 +36,7 @@ public:
                       const HostKeyConfirm& confirm = {});
     esp_err_t connect_password(const SshProfile& profile);
     esp_err_t exec(const std::string& command, SshExecResult& result);
+    esp_err_t fetch_png(const std::string& path, FILE* file, const std::function<bool()>& cancel);
     esp_err_t open_shell(uint16_t cols = 80, uint16_t rows = 24);
     esp_err_t resize_shell(uint16_t cols, uint16_t rows);
     esp_err_t write_shell(const std::string& data);

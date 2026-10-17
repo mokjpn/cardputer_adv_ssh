@@ -2,6 +2,8 @@
 
 English | [中文](README.zh-CN.md)
 
+SSH PNG viewer: [操作・制約・メモリー・検証手順](docs/png-viewer-ja.md).
+
 CardTFT external ST7789 and Japanese display build: [日本語のビルド・操作・実機検証手順](docs/cardtft-ja.md).
 
 Native ESP-IDF firmware for the M5Stack Cardputer-Adv (`cardputer_adv`). It turns the device into a small Wi-Fi SSH terminal with saved server profiles, persistent SSH sessions, on-device settings, and an on-demand local WebUI for easier configuration.

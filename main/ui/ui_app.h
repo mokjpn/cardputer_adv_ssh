@@ -30,6 +30,7 @@ private:
     void ssh_screen();
     void status_screen();
     void terminal_screen();
+    void png_screen(const std::function<void()>& service);
     SshProfile edit_ssh_profile(const SshProfile& initial);
     bool find_ssh_profile(const std::string& name, SshProfile& profile);
     bool load_default_ssh_profile(SshProfile& profile);
@@ -51,6 +52,7 @@ private:
     SshClient& ssh_;
     WebServer& web_;
     TextInput input_;
+    PathHistory png_paths_;
     SshProfile active_profile_;
     SshProfile selected_profile_;
     bool has_selected_profile_ = false;

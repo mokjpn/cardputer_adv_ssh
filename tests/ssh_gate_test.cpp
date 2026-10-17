@@ -69,4 +69,5 @@ int main() {
     assert(client.connect(profile,"",approve)!=0 && auths==8);
     assert(host_key_endpoint("EXAMPLE.COM",22)=="[example.com]:22");
     std::cout << "SSH auth gate + NVS adapter: fingerprint vector, reject before either auth, reconnect, changed key, renamed profile, port, storage error/corruption PASS\n";
+    return 0;
 }

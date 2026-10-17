@@ -2,6 +2,8 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_spiffs.h"
+#include "storage/png_cache.h"
 
 namespace adv {
 namespace {
@@ -18,6 +20,24 @@ void AppController::run()
         display_.show_status("Storage error", {"SSH host keys unavailable", "NVS was NOT erased", "Recover storage explicitly"});
         ESP_LOGE(TAG, "storage initialization failed; refusing to erase host keys");
         return;
+    }
+
+    // Verify only the dedicated cache. No automatic repair or formatting.
+    // Unmount before Wi-Fi/SSH so the check does not retain filesystem buffers.
+    esp_vfs_spiffs_conf_t cache{};
+    cache.base_path = "/images";
+    cache.partition_label = kPngCacheLabel;
+    cache.max_files = 1;
+    cache.format_if_mount_failed = false;
+    esp_err_t cache_result = esp_vfs_spiffs_register(&cache);
+    if (cache_result == ESP_OK) {
+        size_t total = 0, used = 0;
+        esp_err_t info = esp_spiffs_info(kPngCacheLabel, &total, &used);
+        ESP_LOGI(TAG, "PNG cache: %s total=%u used=%u", esp_err_to_name(info),
+                 static_cast<unsigned>(total), static_cast<unsigned>(used));
+        esp_vfs_spiffs_unregister(kPngCacheLabel);
+    } else {
+        ESP_LOGW(TAG, "PNG cache: %s; existing storage untouched", esp_err_to_name(cache_result));
     }
 
     display_.show_status("Boot", {"Initializing keyboard..."});

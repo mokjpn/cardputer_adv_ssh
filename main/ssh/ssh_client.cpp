@@ -1,5 +1,6 @@
 #include "ssh/ssh_client.h"
 #include "ssh/host_key_store.h"
+#include "ssh/image_policy.h"
 
 #include <cerrno>
 #include <cstring>
@@ -193,6 +194,65 @@ esp_err_t SshClient::exec(const std::string& command, SshExecResult& result)
     result.exit_code = libssh2_channel_get_exit_status(channel);
     libssh2_channel_close(channel);
     libssh2_channel_free(channel);
+    return ESP_OK;
+}
+
+// A separate, bounded exec channel on the already verified session. No PTY.
+esp_err_t SshClient::fetch_png(const std::string& path, FILE* file,
+                              const std::function<bool()>& cancel)
+{
+    std::string command;
+    if (!connected() || !file || !image_command(path, command)) {
+        set_error("Need connection and absolute path (max 512 bytes)");
+        return ESP_FAIL;
+    }
+    LIBSSH2_CHANNEL* channel = nullptr;
+    const TickType_t started = xTaskGetTickCount();
+    auto aborted = [&]() {
+        return cancel() || (xTaskGetTickCount()-started) > pdMS_TO_TICKS(30000);
+    };
+    auto fail = [&]() {
+        // Closing the session also releases channels with a pending EAGAIN
+        // operation. Never reuse a partially completed libssh2 operation.
+        if (socket_fd_ >= 0) shutdown(socket_fd_, SHUT_RDWR);
+        libssh2_session_set_blocking(session_, 1);
+        disconnect();
+        set_error("PNG transfer failed/cancelled (30s, 256KiB limit); reconnect");
+        return ESP_FAIL;
+    };
+    libssh2_session_set_blocking(session_, 0);
+    while (!(channel = libssh2_channel_open_ex(session_, "session", 7, 16384, 4096, nullptr, 0))) {
+        if (libssh2_session_last_errno(session_) != LIBSSH2_ERROR_EAGAIN || aborted()) return fail();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    int rc;
+    while ((rc = libssh2_channel_exec(channel, command.c_str())) == LIBSSH2_ERROR_EAGAIN) {
+        if (aborted()) return fail();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (rc) return fail();
+    char buffer[1024];
+    size_t total = 0;
+    while (true) {
+        if (aborted()) return fail();
+        ssize_t n = libssh2_channel_read(channel, buffer, sizeof(buffer));
+        if (n > 0) {
+            total += n;
+            if (total > kPngMaxBytes || fwrite(buffer, 1, n, file) != size_t(n)) return fail();
+        } else if (n < 0 && n != LIBSSH2_ERROR_EAGAIN) return fail();
+        // Drain stderr without displaying remote content or retaining it.
+        ssize_t err = libssh2_channel_read_stderr(channel, buffer, sizeof(buffer));
+        if (err < 0 && err != LIBSSH2_ERROR_EAGAIN) return fail();
+        if (n <= 0 && err <= 0 && libssh2_channel_eof(channel)) break;
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    while ((rc=libssh2_channel_close(channel)) == LIBSSH2_ERROR_EAGAIN) {
+        if (aborted()) return fail();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (rc || libssh2_channel_get_exit_status(channel) != 0 || total == 0) return fail();
+    if (libssh2_channel_free(channel) != 0) return fail();
+    ESP_LOGI(TAG, "PNG transfer complete bytes=%u", static_cast<unsigned>(total));
     return ESP_OK;
 }
 
